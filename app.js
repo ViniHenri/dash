@@ -35,9 +35,7 @@ async function register() {
   err.style.display = 'block';
 }
 
-async function logout() {
-  await db.auth.signOut();
-}
+async function logout() { await db.auth.signOut(); }
 
 function showRegister() {
   document.getElementById('loginForm').style.display = 'none';
@@ -79,13 +77,13 @@ async function loadClients() {
 }
 
 async function addClient() {
-  const name    = document.getElementById('inputName').value.trim();
-  const sector  = document.getElementById('inputSector').value.trim();
-  const token   = document.getElementById('inputToken').value.trim();
-  const adAcct  = document.getElementById('inputAdAccount').value.trim();
-  const pageId  = document.getElementById('inputPageId').value.trim();
-  const errEl   = document.getElementById('addClientError');
-  const btn     = document.getElementById('addClientBtn');
+  const name   = document.getElementById('inputName').value.trim();
+  const sector = document.getElementById('inputSector').value.trim();
+  const token  = document.getElementById('inputToken').value.trim();
+  const adAcct = document.getElementById('inputAdAccount').value.trim();
+  const pageId = document.getElementById('inputPageId').value.trim();
+  const errEl  = document.getElementById('addClientError');
+  const btn    = document.getElementById('addClientBtn');
 
   errEl.style.display = 'none';
   if (!name || !token) { errEl.textContent = 'Nome e token são obrigatórios.'; errEl.style.display = 'block'; return; }
@@ -93,7 +91,6 @@ async function addClient() {
   btn.disabled = true;
   btn.innerHTML = '<span class="spinner"></span>';
 
-  // Valida token chamando a Graph API
   try {
     const res = await fetch(`https://graph.facebook.com/v19.0/me?fields=id,name&access_token=${token}`);
     const json = await res.json();
@@ -105,22 +102,24 @@ async function addClient() {
     return;
   }
 
-  const words = name.split(' ');
-  const initials = (words[0][0] + (words[1] ? words[1][0] : words[0][1] || '')).toUpperCase();
-  const color = COLORS[clients.length % COLORS.length];
+  // Garante que ad_account_id sempre tem o prefixo act_
+  let finalAdAcct = adAcct;
+  if (finalAdAcct && !finalAdAcct.startsWith('act_')) {
+    finalAdAcct = 'act_' + finalAdAcct;
+  }
 
+  const color = COLORS[clients.length % COLORS.length];
   const { data: session } = await db.auth.getSession();
   const { error } = await db.from('clients').insert({
     user_id: session.session.user.id,
     name, sector: sector || 'Geral',
     meta_access_token: token,
-    ad_account_id: adAcct,
+    ad_account_id: finalAdAcct,
     page_id: pageId,
     color, status: 'active',
   });
 
   btn.disabled = false; btn.textContent = 'Adicionar';
-
   if (error) { errEl.textContent = error.message; errEl.style.display = 'block'; return; }
 
   ['inputName','inputSector','inputToken','inputAdAccount','inputPageId'].forEach(id => {
@@ -128,6 +127,70 @@ async function addClient() {
   });
   closeModal('addClientModal');
   await loadClients();
+}
+
+async function saveEditClient() {
+  const id     = document.getElementById('editClientId').value;
+  const name   = document.getElementById('editName').value.trim();
+  const sector = document.getElementById('editSector').value.trim();
+  const token  = document.getElementById('editToken').value.trim();
+  const adAcct = document.getElementById('editAdAccount').value.trim();
+  const pageId = document.getElementById('editPageId').value.trim();
+  const errEl  = document.getElementById('editClientError');
+  const btn    = document.getElementById('editClientBtn');
+
+  errEl.style.display = 'none';
+  if (!name) { errEl.textContent = 'Nome é obrigatório.'; errEl.style.display = 'block'; return; }
+
+  btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>';
+
+  let finalAdAcct = adAcct;
+  if (finalAdAcct && !finalAdAcct.startsWith('act_')) {
+    finalAdAcct = 'act_' + finalAdAcct;
+  }
+
+  const updates = { name, sector: sector || 'Geral', ad_account_id: finalAdAcct, page_id: pageId };
+  if (token) updates.meta_access_token = token;
+
+  const { error } = await db.from('clients').update(updates).eq('id', id);
+
+  btn.disabled = false; btn.textContent = 'Salvar';
+  if (error) { errEl.textContent = error.message; errEl.style.display = 'block'; return; }
+
+  closeModal('editClientModal');
+  await loadClients();
+  // Atualiza cliente atual se for o mesmo
+  if (currentClient && currentClient.id === id) {
+    currentClient = clients.find(c => c.id === id);
+    await renderMain();
+  }
+}
+
+async function deleteClient(id) {
+  if (!confirm('Tem certeza que deseja excluir este cliente? Esta ação não pode ser desfeita.')) return;
+  await db.from('clients').delete().eq('id', id);
+  if (currentClient && currentClient.id === id) {
+    currentClient = null;
+    document.getElementById('mainContent').innerHTML = `
+      <div class="empty-state">
+        <div style="font-size:48px">👈</div>
+        <p style="margin-top:16px; color:var(--muted)">Selecione um cliente</p>
+      </div>`;
+  }
+  await loadClients();
+}
+
+function openEditModal(id) {
+  const c = clients.find(c => c.id === id);
+  if (!c) return;
+  document.getElementById('editClientId').value = c.id;
+  document.getElementById('editName').value = c.name;
+  document.getElementById('editSector').value = c.sector || '';
+  document.getElementById('editAdAccount').value = c.ad_account_id || '';
+  document.getElementById('editPageId').value = c.page_id || '';
+  document.getElementById('editToken').value = '';
+  document.getElementById('editClientError').style.display = 'none';
+  openModal('editClientModal');
 }
 
 function renderSidebar() {
@@ -143,7 +206,9 @@ function renderSidebar() {
         <div class="client-name">${c.name}</div>
         <div class="client-sub">${c.sector}</div>
       </div>
-      <div class="status-dot ${c.status === 'active' ? 'green' : 'amber'}"></div>
+      <button class="client-edit-btn" onclick="event.stopPropagation(); openEditModal('${c.id}')" title="Editar">
+        <svg width="12" height="12" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" stroke-width="2" stroke-linecap="round"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" stroke-width="2" stroke-linecap="round"/></svg>
+      </button>
     </div>`;
   }).join('');
 }
@@ -245,13 +310,13 @@ async function renderMain() {
 
     updateMetaStatus(true);
   } catch(e) {
-    el.innerHTML = `<div class="empty-state"><div style="font-size:48px">⚠️</div><p style="margin-top:16px; color:var(--red)">${e.message}</p><p style="margin-top:8px; color:var(--muted); font-size:13px">Verifique se o token do cliente ainda é válido</p></div>`;
+    el.innerHTML = `<div class="empty-state"><div style="font-size:48px">⚠️</div><p style="margin-top:16px; color:var(--red)">${e.message}</p><p style="margin-top:8px; color:var(--muted); font-size:13px">Verifique se o token do cliente ainda é válido</p><button class="btn-primary" style="margin-top:16px" onclick="openEditModal('${currentClient.id}')">Editar cliente</button></div>`;
     updateMetaStatus(false);
   }
 }
 
 function renderOverviewView(m) {
-  const ini = initials(currentClient.name);
+  const ini   = initials(currentClient.name);
   const imp   = m ? fmt(parseInt(m.impressions)) : '—';
   const reach = m ? fmt(parseInt(m.reach))       : '—';
   const clicks= m ? fmt(parseInt(m.clicks))       : '—';
@@ -269,6 +334,14 @@ function renderOverviewView(m) {
         ${currentClient.ad_account_id ? '<span class="badge badge-blue" style="margin-left:4px">Meta Ads ✓</span>' : ''}
       </p>
     </div>
+    <button class="export-btn" style="margin-left:auto" onclick="openEditModal('${currentClient.id}')">
+      <svg width="13" height="13" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" stroke-width="2" stroke-linecap="round"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" stroke-width="2" stroke-linecap="round"/></svg>
+      Editar cliente
+    </button>
+    <button class="export-btn" style="color:var(--red); border-color:rgba(239,68,68,0.3)" onclick="deleteClient('${currentClient.id}')">
+      <svg width="13" height="13" fill="none" stroke="currentColor" viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6" stroke-width="2" stroke-linecap="round"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6" stroke-width="2" stroke-linecap="round"/><path d="M10 11v6M14 11v6" stroke-width="2" stroke-linecap="round"/></svg>
+      Excluir
+    </button>
   </div>
   <div class="metrics-grid">
     <div class="metric-card blue"><div class="metric-label">Gasto</div><div class="metric-value">${spend}</div><div class="metric-change neutral">Últimos ${currentDateRange} dias</div></div>
@@ -474,5 +547,5 @@ document.querySelectorAll('.modal-overlay').forEach(el => {
 });
 
 function exportReport(name = '') {
-  alert(`Para exportar "${name}" em PDF, integre a biblioteca jsPDF.\nPor enquanto, use Ctrl+P (imprimir como PDF) na página do cliente.`);
+  alert(`Para exportar "${name}" em PDF, use Ctrl+P (imprimir como PDF) na página do cliente.`);
 }

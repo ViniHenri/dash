@@ -245,7 +245,9 @@ async function fetchAdMetrics() {
       time_range: JSON.stringify({ since, until: today() }),
       level: 'account',
     });
-    return insights.data?.[0] || null;
+    const result = insights.data?.[0] || null;
+    console.log('[MetaDesk] result:', JSON.stringify(result));
+    return result;
   } catch(e) { console.error('Ads metrics error:', e); return null; }
 }
 
@@ -323,7 +325,10 @@ function renderOverviewView(m) {
   const spend = m ? fmtMoney(parseFloat(m.spend)) : '—';
   const ctr   = m ? parseFloat(m.ctr).toFixed(2) + '%' : '—';
   const cpc   = m ? 'R$ ' + parseFloat(m.cpc).toFixed(2) : '—';
-  const conv  = m ? (m.actions?.find(a=>a.action_type==='purchase')?.value || '—') : '—';
+  const CONV_TYPES = ['purchase','lead','complete_registration','offsite_conversion.fb_pixel_purchase','onsite_conversion.purchase','offsite_conversion.fb_pixel_lead','onsite_conversion.messaging_conversation_started_7d','onsite_conversion.messaging_first_reply','onsite_conversion.total_messaging_connection'];
+  const totalConv = m?.actions?.filter(a => CONV_TYPES.includes(a.action_type)).reduce((s,a) => s + parseInt(a.value||0), 0) || 0;
+  const conv  = m ? (totalConv > 0 ? String(totalConv) : '—') : '—';
+  const debugActions = m?.actions ? m.actions.map(a => a.action_type + ': ' + a.value).join(' | ') : 'Nenhuma action recebida';
   return `
   <div class="client-header">
     <div class="client-avatar-lg" style="background:${currentClient.color}22; color:${currentClient.color}">${ini}</div>
@@ -354,6 +359,9 @@ function renderOverviewView(m) {
     <div class="metric-card pink"><div class="metric-label">CPC</div><div class="metric-value">${cpc}</div></div>
     <div class="metric-card green"><div class="metric-label">Cliques</div><div class="metric-value">${clicks}</div></div>
     <div class="metric-card purple"><div class="metric-label">Conta</div><div class="metric-value" style="font-size:14px">${currentClient.ad_account_id || 'Não configurada'}</div></div>
+  </div>
+  <div style="background:#1a1a2e; border:1px solid #f59e0b44; border-radius:8px; padding:12px 16px; margin-bottom:16px; font-size:11px; color:#f59e0b; word-break:break-all;">
+    <strong>DEBUG actions:</strong> ${debugActions}
   </div>
   <div class="chart-card">
     <div class="chart-title">Resumo do período</div>
